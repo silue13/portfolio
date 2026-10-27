@@ -9,6 +9,10 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.2.0",
+    "@vercel/blob": "^2.8.2",
+    "bcryptjs": "^3.0.3",
+    "jose": "^6.2.13",
     "next": "16.4.3",
     "react": "19.3.0",
     "react-dom": "19.3.0"
