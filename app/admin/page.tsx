@@ -2,11 +2,24 @@ import { Suspense } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { connection } from "next/server";
 import Link from "next/link";
 import { sql } from "@/lib/db";
 import { isAdmin } from "@/lib/auth";
 
 const MAX_LOGO = 300 * 1024; // 300 Ko
+
+function slugify(text: string): string {
+  return (
+    text
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "projet"
+  );
+}
 
 async function fileToDataUrl(file: FormDataEntryValue | null) {
   if (!(file instanceof File) || file.size === 0) return null;
@@ -27,6 +40,7 @@ async function addProject(formData: FormData) {
   if (!(await isAdmin())) redirect("/admin/login");
 
   const title = String(formData.get("title") ?? "").trim();
+  const slug = slugify(title);
   const summary = String(formData.get("summary") ?? "").trim();
   const category = formData.get("category") === "data" ? "data" : "web";
   const demo = String(formData.get("demo_url") ?? "").trim() || null;
@@ -38,8 +52,8 @@ async function addProject(formData: FormData) {
   const logo = await fileToDataUrl(formData.get("logo"));
 
   await sql`
-    insert into projects (title, category, summary, tech, demo_url, logo_url, published, position)
-    values (${title}, ${category}, ${summary}, ${tech}::text[], ${demo}, ${logo}, ${published},
+    insert into projects (title, slug, category, summary, tech, demo_url, logo_url, published, position)
+    values (${title}, ${slug}, ${category}, ${summary}, ${tech}::text[], ${demo}, ${logo}, ${published},
             (select coalesce(max(position), 0) + 1 from projects))
   `;
   refresh();
@@ -94,7 +108,6 @@ function AdminNav({ current }: { current: "projets" | "profil" | "parcours" }) {
 
   return (
     <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 backdrop-blur-md">
-      {/* Barre supérieure */}
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
         <div className="flex items-center gap-3">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-xs font-bold text-white shadow-sm">
@@ -103,7 +116,6 @@ function AdminNav({ current }: { current: "projets" | "profil" | "parcours" }) {
           <span className="text-sm font-bold tracking-tight text-slate-900 sm:text-base">Espace Admin</span>
         </div>
 
-        {/* Liens Desktop */}
         <nav className="hidden items-center gap-1 sm:flex">
           {tabs.map((tab) => (
             <Link
@@ -120,7 +132,6 @@ function AdminNav({ current }: { current: "projets" | "profil" | "parcours" }) {
           ))}
         </nav>
 
-        {/* Actions rapides */}
         <div className="flex items-center gap-2">
           <a
             href="/"
@@ -144,7 +155,6 @@ function AdminNav({ current }: { current: "projets" | "profil" | "parcours" }) {
         </div>
       </div>
 
-      {/* Onglets tactiles Mobile */}
       <div className="flex border-t border-slate-100 px-4 py-2 sm:hidden overflow-x-auto gap-2">
         {tabs.map((tab) => (
           <Link
@@ -168,6 +178,7 @@ const inputClass =
   "w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-base sm:text-sm text-slate-800 placeholder:text-slate-400 shadow-sm transition focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10";
 
 async function DashboardContent() {
+  await connection();
   if (!(await isAdmin())) redirect("/admin/login");
 
   let projects: any[] = [];
@@ -191,14 +202,12 @@ async function DashboardContent() {
       <AdminNav current="projets" />
 
       <main className="mx-auto max-w-6xl px-4 pt-6 sm:px-6 sm:pt-8">
-        {/* En-tête */}
         <div className="mb-6">
           <h2 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">Gestion des Réalisations</h2>
           <p className="mt-1 text-xs text-slate-500 sm:text-sm">
             Ajoutez, organisez et ajustez la visibilité de vos projets sur votre portfolio.
           </p>
 
-          {/* Métriques */}
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
             <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm sm:rounded-2xl sm:p-4">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 sm:text-xs">Total</span>
@@ -219,9 +228,7 @@ async function DashboardContent() {
           </div>
         </div>
 
-        {/* Grille Formulaire / Liste */}
         <div className="grid gap-6 lg:grid-cols-12 lg:gap-8">
-          {/* Formulaire d'ajout */}
           <section className="lg:col-span-5">
             <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
               <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
@@ -332,7 +339,6 @@ async function DashboardContent() {
             </div>
           </section>
 
-          {/* Liste des projets */}
           <section className="lg:col-span-7">
             <h3 className="mb-3 font-semibold text-slate-900 text-sm sm:text-base">
               Projets enregistrés <span className="text-slate-400">({projects.length})</span>
@@ -394,7 +400,6 @@ async function DashboardContent() {
                       </div>
                     </div>
 
-                    {/* Actions */}
                     <div className="flex shrink-0 items-center gap-1">
                       <form action={togglePublished}>
                         <input type="hidden" name="id" value={p.id} />
@@ -431,7 +436,6 @@ async function DashboardContent() {
                     </div>
                   </div>
 
-                  {/* Accordéon mobile-friendly */}
                   <details className="mt-3 border-t border-slate-100 pt-3">
                     <summary className="flex cursor-pointer items-center justify-between text-xs font-medium text-slate-500 hover:text-indigo-600">
                       <span>Modifier lien ou logo</span>

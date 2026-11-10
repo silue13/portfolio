@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { connection } from "next/server";
 import Link from "next/link";
 import { sql } from "@/lib/db";
 import { isAdmin } from "@/lib/auth";
@@ -36,6 +37,7 @@ const inputClass =
 const labelClass = "mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-600";
 
 async function ProfileContent({ searchParams }: { searchParams: Promise<{ ok?: string }> | undefined }) {
+  await connection();
   if (!(await isAdmin())) redirect("/admin/login");
 
   const resolved = searchParams ? await searchParams : {};

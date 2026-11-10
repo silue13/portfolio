@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { connection } from "next/server";
 import Link from "next/link";
 import { sql } from "@/lib/db";
 import { isAdmin } from "@/lib/auth";
@@ -39,6 +40,7 @@ const inputClass =
 const labelClass = "mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-600";
 
 async function ParcoursContent() {
+  await connection();
   if (!(await isAdmin())) redirect("/admin/login");
 
   let items: any[] = [];
@@ -73,7 +75,6 @@ async function ParcoursContent() {
       </header>
 
       <main className="mx-auto grid max-w-6xl gap-6 px-4 pt-6 sm:px-6 sm:pt-8 lg:grid-cols-12 lg:gap-8">
-        {/* Formulaire */}
         <section className="lg:col-span-5">
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
             <h2 className="border-b border-slate-100 pb-2.5 text-xs font-bold uppercase tracking-wider text-slate-900 sm:text-sm">
@@ -130,7 +131,6 @@ async function ParcoursContent() {
           </div>
         </section>
 
-        {/* Liste */}
         <section className="lg:col-span-7">
           <h2 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-900 sm:text-sm">
             Mon parcours ({items.length})

@@ -1,10 +1,23 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { connection } from "next/server";
 import { sql } from "@/lib/db";
 import { isAdmin } from "@/lib/auth";
 
 const MAX_LOGO = 300 * 1024; // 300 Ko
+
+function slugify(text: string): string {
+  return (
+    text
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "projet"
+  );
+}
 
 async function fileToDataUrl(file: FormDataEntryValue | null) {
   if (!(file instanceof File) || file.size === 0) return null;
@@ -25,6 +38,7 @@ async function addProject(formData: FormData) {
   if (!(await isAdmin())) redirect("/admin/login");
 
   const title = String(formData.get("title") ?? "").trim();
+  const slug = slugify(title);
   const summary = String(formData.get("summary") ?? "").trim();
   const category = formData.get("category") === "data" ? "data" : "web";
   const demo = String(formData.get("demo_url") ?? "").trim() || null;
@@ -36,8 +50,8 @@ async function addProject(formData: FormData) {
   const logo = await fileToDataUrl(formData.get("logo"));
 
   await sql`
-    insert into projects (title, category, summary, tech, demo_url, logo_url, published, position)
-    values (${title}, ${category}, ${summary}, ${tech}::text[], ${demo}, ${logo}, ${published},
+    insert into projects (title, slug, category, summary, tech, demo_url, logo_url, published, position)
+    values (${title}, ${slug}, ${category}, ${summary}, ${tech}::text[], ${demo}, ${logo}, ${published},
             (select coalesce(max(position), 0) + 1 from projects))
   `;
   refresh();
@@ -82,6 +96,7 @@ const fileInput =
   "w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-200";
 
 async function Content() {
+  await connection();
   if (!(await isAdmin())) redirect("/admin/login");
   let projects: any[] = [];
   try {
