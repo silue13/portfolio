@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -12,9 +12,27 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+
 export const metadata: Metadata = {
-  title: "Portfolio | Data Analyst & Développeur Web",
-  description: "Mon portfolio de projets data et web",
+  ...(siteUrl ? { metadataBase: new URL(siteUrl) } : {}),
+  title: {
+    default: "Portfolio | Data Analyst & Développeur Web",
+    template: "%s | Portfolio",
+  },
+  description: "Portfolio de projets data et web : analyse de données, tableaux de bord et applications web.",
+  openGraph: {
+    type: "website",
+    locale: "fr_FR",
+    title: "Portfolio | Data Analyst & Développeur Web",
+    description: "Portfolio de projets data et web : analyse de données, tableaux de bord et applications web.",
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#020617",
 };
 
 export default function RootLayout({

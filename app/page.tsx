@@ -2,32 +2,17 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { sql } from "@/lib/db";
 import { getProfile } from "@/lib/profile";
-
-type Project = {
-  id: string;
-  title: string;
-  category: "data" | "web";
-  summary: string;
-  tech: string[] | string | null;
-  demo_url: string | null;
-  logo_url: string | null;
-};
-
-type Item = {
-  id: string;
-  kind: string;
-  title: string;
-  school: string;
-  start_year: number | null;
-  end_year: number | null;
-  description: string | null;
-};
+import { displayUrl, formatPeriod, parseTech, safeUrl } from "@/lib/utils";
+import type { Item, Project } from "@/lib/types";
+import ProjectsGrid from "@/components/projects-grid";
+import ContactForm from "@/components/contact-form";
 
 function SectionTitle({ label, title }: { label: string; title: string }) {
   return (
     <div className="mb-6 sm:mb-10">
-      <p className="text-xs sm:text-sm font-semibold uppercase tracking-widest text-indigo-600">{label}</p>
-      <h2 className="mt-1.5 sm:mt-2 text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">{title}</h2>
+      <p className="text-xs font-semibold uppercase tracking-widest text-indigo-600 sm:text-sm">{label}</p>
+      <h2 className="mt-1.5 text-2xl font-bold tracking-tight text-slate-900 sm:mt-2 sm:text-3xl">{title}</h2>
+      <div className="mt-3 h-1 w-12 rounded-full bg-gradient-to-r from-indigo-500 to-emerald-400" />
     </div>
   );
 }
@@ -39,7 +24,7 @@ type SkillIconInfo =
   | { kind: "badge"; text: string; bg: string; fg: string };
 
 const devicon = (slug: string) =>
-  `https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/${slug}/${slug}-original.svg`;
+  `https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/${slug}/${slug}-original.svg`;
 
 const img = (slug: string): SkillIconInfo => ({ kind: "img", src: devicon(slug) });
 const badge = (text: string, bg: string, fg = "#ffffff"): SkillIconInfo => ({ kind: "badge", text, bg, fg });
@@ -197,109 +182,39 @@ function ContactCard({
 
 /* ---------- Sections dynamiques ---------- */
 
-function ProjectCard({ p }: { p: Project }) {
-  const isData = p.category === "data";
-  const hasLink = Boolean(p.demo_url);
-
-  const techList: string[] = Array.isArray(p.tech)
-    ? p.tech
-    : typeof p.tech === "string"
-    ? (p.tech as string).replace(/^\{|\}$/g, "").split(",").map((t) => t.trim()).filter(Boolean)
-    : [];
-
-  const content = (
-    <>
-      <div
-        className={`h-1.5 ${
-          isData
-            ? "bg-gradient-to-r from-emerald-400 to-teal-500"
-            : "bg-gradient-to-r from-indigo-500 to-purple-500"
-        }`}
-      />
-      <div className="flex flex-1 flex-col p-4 sm:p-6">
-        <div className="flex items-center justify-between gap-3">
-          <span
-            className={`w-fit rounded-full px-2.5 py-0.5 text-[11px] sm:text-xs font-semibold ${
-              isData ? "bg-emerald-50 text-emerald-700" : "bg-indigo-50 text-indigo-700"
-            }`}
-          >
-            {isData ? "Data" : "Web"}
-          </span>
-          {p.logo_url && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={p.logo_url}
-              alt={`Logo ${p.title}`}
-              loading="lazy"
-              className="h-10 w-10 sm:h-12 sm:w-14 rounded-xl border border-slate-200 bg-white object-contain p-1 shadow-sm"
-            />
-          )}
-        </div>
-        <h3 className="mt-3 sm:mt-4 text-lg sm:text-xl font-semibold text-slate-900">{p.title}</h3>
-        <p className="mt-2 flex-1 text-xs sm:text-sm leading-relaxed text-slate-600">{p.summary}</p>
-        <div className="mt-4 flex flex-wrap gap-1.5 sm:gap-2">
-          {techList.map((t) => (
-            <span key={t} className="rounded-md bg-slate-100 px-2 py-0.5 sm:py-1 text-[11px] sm:text-xs font-medium text-slate-700">
-              {t}
-            </span>
-          ))}
-        </div>
-        {hasLink && (
-          <span className="mt-5 sm:mt-6 inline-flex w-full sm:w-fit items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs sm:text-sm font-medium text-white transition group-hover:bg-indigo-600">
-            Tester l&apos;application <span className="transition group-hover:translate-x-1">→</span>
-          </span>
-        )}
-      </div>
-    </>
-  );
-
-  const base = "group flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm";
-
-  return hasLink ? (
-    <a
-      href={p.demo_url!}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={`${base} transition duration-300 hover:-translate-y-1 hover:shadow-xl`}
-    >
-      {content}
-    </a>
-  ) : (
-    <div className={base}>{content}</div>
-  );
-}
-
 async function ProjectsList() {
   await connection();
   let projects: Project[] = [];
   try {
-    projects = (await sql`
-      select id, title, category, summary, tech, demo_url, logo_url
+    const rows = await sql`
+      select id, title, category, summary, tech, demo_url,
+             (logo_url is not null) as has_logo, coalesce(length(logo_url), 0) as logo_v
       from projects
       where published = true
       order by position asc nulls last, created_at desc
-    `) as Project[];
+    `;
+    projects = rows.map((r): Project => ({
+      id: String(r.id),
+      title: String(r.title),
+      category: r.category === "data" ? "data" : "web",
+      summary: String(r.summary ?? ""),
+      tech: parseTech(r.tech),
+      demo_url: safeUrl(r.demo_url),
+      logo_src: r.has_logo ? `/api/logo/${r.id}?v=${r.logo_v}` : null,
+    }));
   } catch (error) {
     console.error("Erreur chargement projets:", error);
   }
 
   if (projects.length === 0) {
     return (
-      <p className="rounded-2xl border border-dashed border-slate-300 p-8 text-center text-xs sm:text-sm text-slate-500">
+      <p className="rounded-2xl border border-dashed border-slate-300 p-8 text-center text-xs text-slate-500 sm:text-sm">
         Les projets arrivent bientôt.
       </p>
     );
   }
 
-  return (
-    <ul className="grid gap-4 sm:gap-6 sm:grid-cols-2">
-      {projects.map((p) => (
-        <li key={p.id}>
-          <ProjectCard p={p} />
-        </li>
-      ))}
-    </ul>
-  );
+  return <ProjectsGrid projects={projects} />;
 }
 
 async function Parcours() {
@@ -314,38 +229,44 @@ async function Parcours() {
     console.error("Erreur chargement parcours:", error);
   }
 
-  if (items.length === 0) return null;
+  if (items.length === 0) {
+    return (
+      <p className="rounded-2xl border border-dashed border-slate-300 p-8 text-center text-xs text-slate-500 sm:text-sm">
+        Le parcours sera bientôt détaillé.
+      </p>
+    );
+  }
 
   return (
-    <ul className="relative ml-2 sm:ml-4 space-y-6 sm:space-y-8 border-l-2 border-indigo-200 pl-4 sm:pl-8">
-      {items.map((i) => (
-        <li key={i.id} className="relative">
-          <span className="absolute -left-[23px] sm:-left-[39px] top-1.5 h-3.5 w-3.5 sm:h-4 sm:w-4 rounded-full border-2 sm:border-4 border-white bg-indigo-600 shadow" />
-          <div className="rounded-xl sm:rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-[11px] sm:text-xs font-semibold text-indigo-700">
-                {i.kind === "diplome" ? "Diplôme" : "Formation"}
-              </span>
-              <span className="text-[11px] sm:text-xs font-medium text-slate-500">
-                {i.start_year}
-                {i.end_year ? ` – ${i.end_year}` : i.start_year ? " – présent" : ""}
-              </span>
+    <ul className="relative ml-2 space-y-6 border-l-2 border-indigo-200 pl-4 sm:ml-4 sm:space-y-8 sm:pl-8">
+      {items.map((i) => {
+        const period = formatPeriod(i.start_year, i.end_year);
+        return (
+          <li key={i.id} className="relative">
+            <span className="absolute -left-[23px] top-1.5 h-3.5 w-3.5 rounded-full border-2 border-white bg-indigo-600 shadow sm:-left-[39px] sm:h-4 sm:w-4 sm:border-4" />
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:shadow-md sm:rounded-2xl sm:p-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-700 sm:text-xs">
+                  {i.kind === "diplome" ? "Diplôme" : "Formation"}
+                </span>
+                {period && <span className="text-[11px] font-medium text-slate-500 sm:text-xs">{period}</span>}
+              </div>
+              <h3 className="mt-2 text-sm font-semibold text-slate-900 sm:text-base">{i.title}</h3>
+              <p className="text-xs text-slate-600 sm:text-sm">{i.school}</p>
+              {i.description && <p className="mt-2 text-xs leading-relaxed text-slate-500 sm:text-sm">{i.description}</p>}
             </div>
-            <h3 className="mt-2 text-sm sm:text-base font-semibold text-slate-900">{i.title}</h3>
-            <p className="text-xs sm:text-sm text-slate-600">{i.school}</p>
-            {i.description && <p className="mt-2 text-xs sm:text-sm leading-relaxed text-slate-500">{i.description}</p>}
-          </div>
-        </li>
-      ))}
+          </li>
+        );
+      })}
     </ul>
   );
 }
 
 function Skeleton() {
   return (
-    <div className="grid gap-4 sm:gap-6 sm:grid-cols-2">
+    <div className="grid gap-4 sm:grid-cols-2 sm:gap-6" aria-hidden="true">
       {[1, 2].map((n) => (
-        <div key={n} className="h-44 sm:h-48 animate-pulse rounded-2xl bg-slate-200" />
+        <div key={n} className="h-44 animate-pulse rounded-2xl bg-slate-200 sm:h-48" />
       ))}
     </div>
   );
@@ -357,148 +278,136 @@ async function HomeContent() {
   const { name: NAME, title: TITLE, bio: BIO, email: EMAIL, skills: SKILLS } = profile;
 
   const phoneDigits = profile.phone.replace(/\D/g, "");
-  const formatUrl = (u: string) => (u.startsWith("http://") || u.startsWith("https://") ? u : `https://${u}`);
-  const cleanUrl = (u: string) => u.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "");
-  const hasContacts = Boolean(EMAIL || phoneDigits || profile.github || profile.linkedin);
+  const github = safeUrl(profile.github);
+  const linkedin = safeUrl(profile.linkedin);
+  const hasContacts = Boolean(EMAIL || phoneDigits || github || linkedin);
+  const initials =
+    NAME.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "P";
 
   return (
     <div className="min-h-screen bg-white text-slate-900">
-      {/* Navigation responsive */}
+      <a
+        href="#projets"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[60] focus:rounded-lg focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-slate-900"
+      >
+        Aller au contenu
+      </a>
+
       <header className="sticky top-0 z-50 border-b border-white/10 bg-slate-950/80 backdrop-blur-md">
-        <nav className="mx-auto flex max-w-5xl items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4">
-          <a href="#accueil" className="text-xs sm:text-sm font-bold tracking-wider sm:tracking-widest text-white">
-            MON PORTFOLIO
+        <nav aria-label="Navigation principale" className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3 sm:px-6 sm:py-3.5">
+          <a href="#accueil" className="flex items-center gap-2.5 text-white">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-purple-500 text-xs font-bold shadow">
+              {initials}
+            </span>
+            <span className="max-w-[10rem] truncate text-xs font-bold tracking-wide sm:max-w-none sm:text-sm">{NAME}</span>
           </a>
-          <div className="flex gap-4 sm:gap-6 text-xs sm:text-sm text-slate-300">
+          <div className="flex items-center gap-4 text-xs text-slate-300 sm:gap-6 sm:text-sm">
             <a href="#projets" className="transition hover:text-white">Projets</a>
             <a href="#parcours" className="transition hover:text-white">Parcours</a>
-            <a href="#contact" className="transition hover:text-white">Contact</a>
+            <a href="#contact" className="rounded-lg bg-white/10 px-3 py-1.5 font-medium text-white transition hover:bg-white/20">Contact</a>
           </div>
         </nav>
       </header>
 
-      {/* Accueil / Hero */}
-      <section id="accueil" className="relative overflow-hidden bg-slate-950 text-white">
-        <div className="absolute -top-32 left-1/4 h-80 w-80 sm:h-96 sm:w-96 rounded-full bg-indigo-600/30 blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-32 right-1/4 h-80 w-80 sm:h-96 sm:w-96 rounded-full bg-emerald-500/20 blur-3xl pointer-events-none" />
-        
-        <div className="relative mx-auto max-w-5xl px-4 sm:px-6 py-14 sm:py-24 lg:py-32">
-          <p className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] sm:text-xs text-slate-300">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
-            Disponible pour de nouveaux projets
-          </p>
+      <main>
+        {/* Accueil */}
+        <section id="accueil" className="bg-grid relative overflow-hidden bg-slate-950 text-white">
+          <div className="pointer-events-none absolute -top-32 left-1/4 h-80 w-80 rounded-full bg-indigo-600/30 blur-3xl sm:h-96 sm:w-96" />
+          <div className="pointer-events-none absolute -bottom-32 right-1/4 h-80 w-80 rounded-full bg-emerald-500/20 blur-3xl sm:h-96 sm:w-96" />
 
-          <h1 className="mt-5 text-3xl font-extrabold tracking-tight sm:text-5xl lg:text-6xl">
-            Salut, je suis{" "}
-            <span className="bg-gradient-to-r from-indigo-400 via-purple-400 to-emerald-400 bg-clip-text text-transparent">
-              {NAME}
-            </span>
-          </h1>
+          <div className="animate-fade-up relative mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-24 lg:py-32">
+            <p className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-slate-300 sm:text-xs">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
+              Disponible pour de nouveaux projets
+            </p>
 
-          <p className="mt-3 text-base sm:text-xl font-medium text-slate-300">{TITLE}</p>
-          <p className="mt-4 max-w-xl text-xs sm:text-sm leading-relaxed text-slate-400">{BIO}</p>
+            <h1 className="mt-5 text-3xl font-extrabold tracking-tight sm:text-5xl lg:text-6xl">
+              Salut, je suis{" "}
+              <span className="bg-gradient-to-r from-indigo-400 via-purple-400 to-emerald-400 bg-clip-text text-transparent">{NAME}</span>
+            </h1>
 
-          <div className="mt-7 sm:mt-8 flex flex-col sm:flex-row gap-3">
-            <a
-              href="#projets"
-              className="w-full sm:w-auto text-center rounded-xl bg-indigo-600 px-6 py-3.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 active:scale-[0.99]"
-            >
-              Voir mes projets
-            </a>
-            <a
-              href="#contact"
-              className="w-full sm:w-auto text-center rounded-xl border border-white/20 px-6 py-3.5 text-xs sm:text-sm font-semibold text-white transition hover:bg-white/10 active:scale-[0.99]"
-            >
-              Me contacter
-            </a>
-          </div>
-        </div>
-      </section>
+            <p className="mt-3 text-base font-medium text-slate-300 sm:text-xl">{TITLE}</p>
+            {BIO && <p className="mt-4 max-w-xl text-sm leading-relaxed text-slate-400">{BIO}</p>}
 
-      {/* Compétences */}
-      {SKILLS.length > 0 && (
-        <section className="border-b border-slate-200 bg-slate-50">
-          <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-center gap-2 sm:gap-3 px-4 sm:px-6 py-6 sm:py-10">
-            {SKILLS.map((s) => (
-              <SkillChip key={s} name={s} />
-            ))}
+            <div className="mt-7 flex flex-col gap-3 sm:mt-8 sm:flex-row">
+              <a href="#projets" className="w-full rounded-xl bg-indigo-600 px-6 py-3.5 text-center text-sm font-semibold text-white shadow-lg shadow-indigo-600/25 transition hover:bg-indigo-500 active:scale-[0.99] sm:w-auto">
+                Voir mes projets
+              </a>
+              <a href="#contact" className="w-full rounded-xl border border-white/20 px-6 py-3.5 text-center text-sm font-semibold text-white transition hover:bg-white/10 active:scale-[0.99] sm:w-auto">
+                Me contacter
+              </a>
+            </div>
           </div>
         </section>
-      )}
 
-      {/* Projets */}
-      <section id="projets" className="mx-auto max-w-5xl px-4 sm:px-6 py-14 sm:py-20 lg:py-24">
-        <SectionTitle label="Réalisations" title="Mes projets" />
-        <Suspense fallback={<Skeleton />}>
-          <ProjectsList />
-        </Suspense>
-      </section>
+        {/* Compétences */}
+        {SKILLS.length > 0 && (
+          <section aria-label="Compétences" className="border-b border-slate-200 bg-slate-50">
+            <div className="mx-auto max-w-5xl px-4 py-8 text-center sm:px-6 sm:py-10">
+              <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Technologies & outils</p>
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
+                {SKILLS.map((s) => (
+                  <SkillChip key={s} name={s} />
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
 
-      {/* Parcours */}
-      <section id="parcours" className="bg-slate-50 py-14 sm:py-20 lg:py-24">
-        <div className="mx-auto max-w-3xl px-4 sm:px-6">
-          <SectionTitle label="Formation" title="Parcours & formations" />
+        {/* Projets */}
+        <section id="projets" className="mx-auto max-w-5xl scroll-mt-16 px-4 py-14 sm:px-6 sm:py-20 lg:py-24">
+          <SectionTitle label="Réalisations" title="Mes projets" />
           <Suspense fallback={<Skeleton />}>
-            <Parcours />
+            <ProjectsList />
           </Suspense>
-        </div>
-      </section>
+        </section>
 
-      {/* Contact */}
-      <section id="contact" className="bg-slate-950 py-14 sm:py-20 lg:py-24 text-center text-white">
-        <div className="mx-auto max-w-2xl px-4 sm:px-6">
-          <p className="text-xs sm:text-sm font-semibold uppercase tracking-widest text-indigo-400">Contact</p>
-          <h2 className="mt-1.5 sm:mt-2 text-2xl sm:text-3xl font-bold">Travaillons ensemble</h2>
-          <p className="mt-3 text-xs sm:text-sm text-slate-400">
-            Un projet data, une application web ou une question ? Écris-moi, je réponds rapidement.
-          </p>
+        {/* Parcours */}
+        <section id="parcours" className="scroll-mt-16 bg-slate-50 py-14 sm:py-20 lg:py-24">
+          <div className="mx-auto max-w-3xl px-4 sm:px-6">
+            <SectionTitle label="Formation" title="Parcours & formations" />
+            <Suspense fallback={<Skeleton />}>
+              <Parcours />
+            </Suspense>
+          </div>
+        </section>
 
-          {hasContacts && (
-            <div className="mt-8 sm:mt-10 grid gap-3 sm:gap-4 sm:grid-cols-2">
-              {EMAIL && (
-                <ContactCard
-                  href={`mailto:${EMAIL}`}
-                  external={false}
-                  icon={<MailIcon />}
-                  label="E-mail"
-                  value={EMAIL}
-                  color="bg-indigo-500/20 text-indigo-300"
-                />
-              )}
-              {phoneDigits && (
-                <ContactCard
-                  href={`https://wa.me/${phoneDigits}`}
-                  icon={<WhatsAppIcon />}
-                  label="WhatsApp"
-                  value={`+${phoneDigits}`}
-                  color="bg-emerald-500/20 text-emerald-300"
-                />
-              )}
-              {profile.github && (
-                <ContactCard
-                  href={formatUrl(profile.github)}
-                  icon={<GithubIcon />}
-                  label="GitHub"
-                  value={cleanUrl(profile.github)}
-                  color="bg-slate-500/20 text-slate-200"
-                />
-              )}
-              {profile.linkedin && (
-                <ContactCard
-                  href={formatUrl(profile.linkedin)}
-                  icon={<LinkedinIcon />}
-                  label="LinkedIn"
-                  value={cleanUrl(profile.linkedin)}
-                  color="bg-sky-500/20 text-sky-300"
-                />
+        {/* Contact */}
+        <section id="contact" className="scroll-mt-16 bg-slate-950 py-14 text-white sm:py-20 lg:py-24">
+          <div className="mx-auto grid max-w-5xl gap-10 px-4 sm:px-6 lg:grid-cols-2 lg:gap-14">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-widest text-indigo-400 sm:text-sm">Contact</p>
+              <h2 className="mt-1.5 text-2xl font-bold sm:mt-2 sm:text-3xl">Travaillons ensemble</h2>
+              <p className="mt-3 text-sm leading-relaxed text-slate-400">
+                Un projet data, une application web ou une question ? Écris-moi via le formulaire ou directement sur l&apos;un de ces canaux.
+              </p>
+
+              {hasContacts && (
+                <div className="mt-8 grid gap-3">
+                  {EMAIL && (
+                    <ContactCard href={`mailto:${EMAIL}`} external={false} icon={<MailIcon />} label="E-mail" value={EMAIL} color="bg-indigo-500/20 text-indigo-300" />
+                  )}
+                  {phoneDigits && (
+                    <ContactCard href={`https://wa.me/${phoneDigits}`} icon={<WhatsAppIcon />} label="WhatsApp" value={`+${phoneDigits}`} color="bg-emerald-500/20 text-emerald-300" />
+                  )}
+                  {github && (
+                    <ContactCard href={github} icon={<GithubIcon />} label="GitHub" value={displayUrl(github)} color="bg-slate-500/20 text-slate-200" />
+                  )}
+                  {linkedin && (
+                    <ContactCard href={linkedin} icon={<LinkedinIcon />} label="LinkedIn" value={displayUrl(linkedin)} color="bg-sky-500/20 text-sky-300" />
+                  )}
+                </div>
               )}
             </div>
-          )}
-        </div>
-      </section>
 
-      <footer className="bg-slate-950 pb-8 text-center text-[11px] sm:text-xs text-slate-500">
-        © {new Date().getFullYear()} {NAME}. Tous droits réservés.
+            <ContactForm />
+          </div>
+        </section>
+      </main>
+
+      <footer className="border-t border-white/10 bg-slate-950 py-6 text-center text-[11px] text-slate-500 sm:text-xs">
+        <p>© {new Date().getFullYear()} {NAME}. Tous droits réservés.</p>
+        <a href="#accueil" className="mt-1 inline-block transition hover:text-slate-300">↑ Haut de page</a>
       </footer>
     </div>
   );
